@@ -26,7 +26,7 @@ const clean = (v, n) => String(v || '').trim().slice(0, n);
 async function callGemini(user) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error('MISSING_GEMINI_KEY');
-  const model = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
+  const model = (process.env.GEMINI_MODEL || 'gemini-flash-lite-latest').trim();
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
@@ -37,8 +37,9 @@ async function callGemini(user) {
     }),
   });
   if (!res.ok) {
-    console.error('Gemini error', res.status, await res.text());
-    throw new Error('PROVIDER_' + res.status);
+    const detail = await res.text();
+    console.error('Gemini error', res.status, detail);
+    throw new Error('PROVIDER_' + res.status + ' ' + detail.slice(0, 200));
   }
   const data = await res.json();
   return ((data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || []).map((p) => p.text || '').join('');
@@ -86,7 +87,8 @@ export async function POST(req) {
     console.error('Roadmap error', err);
     const m = String(err.message);
     if (m.startsWith('MISSING_')) return Response.json({ error: 'The AI key is missing. Add it in Vercel under Settings, Environment Variables, then redeploy.' }, { status: 500 });
-    if (m.startsWith('PROVIDER_')) return Response.json({ error: `The AI service returned an error (${m.slice(9)}). Check the Vercel function logs.` }, { status: 502 });
+    if (/^PROVIDER_(429|500|503)/.test(m)) return Response.json({ error: 'AI Kazi is very busy right now.', busy: true }, { status: 503 });
+    if (m.startsWith('PROVIDER_')) return Response.json({ error: `The AI service returned an error (${m.slice(9, 120)})` }, { status: 502 });
     return Response.json({ error: 'Could not build your roadmap. Please try again.' }, { status: 500 });
   }
 }
