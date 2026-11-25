@@ -41,7 +41,7 @@ export default function Questions() {
       let data;
       try { data = JSON.parse(raw); } catch { data = { busy: true }; }
       if (data.busy) {
-        sessionStorage.setItem('kazi_pending', JSON.stringify(input));
+        localStorage.setItem('kazi_pending', JSON.stringify(input));
         router.push('/busy');
         return;
       }
