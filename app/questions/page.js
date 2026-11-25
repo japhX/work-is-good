@@ -39,7 +39,12 @@ export default function Questions() {
       const res = await fetch('/api/roadmap', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
       const raw = await res.text();
       let data;
-      try { data = JSON.parse(raw); } catch { throw new Error('The server took too long or hit an error. Please try again.'); }
+      try { data = JSON.parse(raw); } catch { data = { busy: true }; }
+      if (data.busy) {
+        sessionStorage.setItem('kazi_pending', JSON.stringify(input));
+        router.push('/busy');
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Something went wrong.');
       sessionStorage.setItem('kazi_plan', JSON.stringify({ input, plan: data }));
       router.push('/roadmap');
