@@ -37,7 +37,9 @@ export default function Questions() {
     const input = { current: a[0].trim(), goal: a[1].trim(), timeframe: a[2], hurdles: a[3].picked, extra: a[3].extra.trim() };
     try {
       const res = await fetch('/api/roadmap', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
-      const data = await res.json();
+      const raw = await res.text();
+      let data;
+      try { data = JSON.parse(raw); } catch { throw new Error('The server took too long or hit an error. Please try again.'); }
       if (!res.ok) throw new Error(data.error || 'Something went wrong.');
       sessionStorage.setItem('kazi_plan', JSON.stringify({ input, plan: data }));
       router.push('/roadmap');
