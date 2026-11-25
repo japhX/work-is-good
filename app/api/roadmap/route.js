@@ -23,6 +23,43 @@ Rules:
 
 const clean = (v, n) => String(v || '').trim().slice(0, n);
 
+async function callGemini(user) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error('MISSING_GEMINI_KEY');
+  const model = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: SYSTEM }] },
+      contents: [{ role: 'user', parts: [{ text: user }] }],
+      generationConfig: { maxOutputTokens: 8000, responseMimeType: 'application/json' },
+    }),
+  });
+  if (!res.ok) {
+    console.error('Gemini error', res.status, await res.text());
+    throw new Error('PROVIDER_' + res.status);
+  }
+  const data = await res.json();
+  return ((data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || []).map((p) => p.text || '').join('');
+}
+
+async function callClaude(user) {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error('MISSING_ANTHROPIC_KEY');
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: process.env.CLAUDE_MODEL || 'claude-sonnet-5-5', max_tokens: 3000, system: SYSTEM, messages: [{ role: 'user', content: user }] }),
+  });
+  if (!res.ok) {
+    console.error('Anthropic error', res.status, await res.text());
+    throw new Error('PROVIDER_' + res.status);
+  }
+  const data = await res.json();
+  return (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+}
+
 export async function POST(req) {
   let body;
   try { body = await req.json(); } catch { return Response.json({ error: 'Invalid request.' }, { status: 400 }); }
@@ -35,24 +72,11 @@ export async function POST(req) {
   if (!current || !goal || !timeframe || (!hurdles.length && !extra)) {
     return Response.json({ error: 'Please answer all four questions.' }, { status: 400 });
   }
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return Response.json({ error: 'Server is missing ANTHROPIC_API_KEY. Add it in Vercel under Settings, Environment Variables, then redeploy.' }, { status: 500 });
-  }
 
   const user = `<current>${current}</current>\n<goal>${goal}</goal>\n<timeframe>${timeframe}</timeframe>\n<hurdles>${hurdles.join('; ')}</hurdles>\n<extra>${extra}</extra>`;
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: process.env.CLAUDE_MODEL || 'claude-sonnet-5-5', max_tokens: 3000, system: SYSTEM, messages: [{ role: 'user', content: user }] }),
-    });
-    if (!res.ok) {
-      console.error('Anthropic API error', res.status, await res.text());
-      return Response.json({ error: `The AI service returned an error (${res.status}). Check the Vercel function logs.` }, { status: 502 });
-    }
-    const data = await res.json();
-    const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+    const text = process.env.AI_PROVIDER === 'claude' ? await callClaude(user) : await callGemini(user);
     const plan = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
     const ok = plan && plan.strategy && plan.destination && plan.first_move && Array.isArray(plan.stages) && plan.stages.length === 4
       && plan.stages.every((s) => Array.isArray(s.actions) && s.title && s.checkpoint);
@@ -60,6 +84,9 @@ export async function POST(req) {
     return Response.json(plan);
   } catch (err) {
     console.error('Roadmap error', err);
+    const m = String(err.message);
+    if (m.startsWith('MISSING_')) return Response.json({ error: 'The AI key is missing. Add it in Vercel under Settings, Environment Variables, then redeploy.' }, { status: 500 });
+    if (m.startsWith('PROVIDER_')) return Response.json({ error: `The AI service returned an error (${m.slice(9)}). Check the Vercel function logs.` }, { status: 502 });
     return Response.json({ error: 'Could not build your roadmap. Please try again.' }, { status: 500 });
   }
 }
